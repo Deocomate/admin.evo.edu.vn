@@ -10,7 +10,6 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 use Illuminate\Validation\Rule;
-
 use Illuminate\Support\Facades\Mail;
 use App\Mail\KingExpressBus\CustomerRegistrationSuccess;
 use App\Mail\KingExpressBus\AdminNewCustomerNotification;
@@ -20,20 +19,18 @@ class CustomerController extends Controller
     /**
      * Display a listing of the resource.
      */
-    // app/Http/Controllers/KingExpressBus/Admin/CustomerController.php
-
     public function index(Request $request)
     {
         $query = DB::table('customers')
             ->leftJoin('trainings', 'customers.training_id', '=', 'trainings.id')
             ->select('customers.id', 'customers.full_name_parent', 'customers.phone', 'customers.full_name_children', 'customers.created_at', 'trainings.title as training_title', 'customers.status');
 
-        // Lọc theo trạng thái (Giữ nguyên)
+        // Lọc theo trạng thái
         if ($request->filled('status')) {
             $query->where('customers.status', $request->input('status'));
         }
 
-        // Lọc theo khoảng ngày (Giữ nguyên)
+        // Lọc theo khoảng ngày
         if ($request->filled('date_range')) {
             try {
                 $dateParts = explode(' - ', $request->input('date_range'));
@@ -47,7 +44,7 @@ class CustomerController extends Controller
             }
         }
 
-        // *** THÊM MỚI: Logic tìm kiếm theo tên phụ huynh hoặc tên học viên ***
+        // Logic tìm kiếm theo tên phụ huynh hoặc tên học viên
         if ($request->filled('search')) {
             $searchTerm = $request->input('search');
             $query->where(function ($q) use ($searchTerm) {
@@ -56,12 +53,14 @@ class CustomerController extends Controller
             });
         }
 
-        // *** THAY ĐỔI: Sử dụng paginate thay vì get ***
         $customers = $query->orderBy('customers.created_at', 'desc')->paginate(10);
 
         return view('kingexpressbus.admin.modules.customers.index', compact('customers'));
     }
 
+    /**
+     * Display the specified resource.
+     */
     public function show(string $id)
     {
         $customer = DB::table('customers')
@@ -74,11 +73,10 @@ class CustomerController extends Controller
     }
 
     /**
-     * PHƯƠNG THỨC MỚI: Cập nhật trạng thái của một khách hàng
+     * Update the status of a customer.
      */
     public function updateStatus(Request $request, string $id)
     {
-        // 1. Validate dữ liệu đầu vào
         $validator = Validator::make($request->all(), [
             'status' => ['required', Rule::in(['pending', 'confirmed', 'cancelled'])],
         ]);
@@ -87,13 +85,11 @@ class CustomerController extends Controller
             return back()->with('error', 'Trạng thái không hợp lệ.');
         }
 
-        // 2. Tìm khách hàng
         $customer = DB::table('customers')->where('id', $id);
         if (!$customer->exists()) {
             return back()->with('error', 'Không tìm thấy khách hàng.');
         }
 
-        // 3. Cập nhật trạng thái
         try {
             $customer->update(['status' => $request->input('status')]);
         } catch (Throwable $e) {
@@ -101,10 +97,12 @@ class CustomerController extends Controller
             return back()->with('error', 'Đã có lỗi xảy ra khi cập nhật trạng thái.');
         }
 
-        // 4. Quay lại với thông báo thành công
         return back()->with('success', 'Cập nhật trạng thái thành công!');
     }
 
+    /**
+     * Remove the specified resource from storage.
+     */
     public function destroy(string $id)
     {
         $customer = DB::table('customers')->find($id);
@@ -117,27 +115,31 @@ class CustomerController extends Controller
         return redirect()->route('admin.customers.index')->with('success', 'Thông tin khách hàng đã được xóa thành công!');
     }
 
-
+    /**
+     * Store a newly created resource in storage.
+     */
     public function store(Request $request): JsonResponse
     {
+        // CHANGED: Cập nhật quy tắc validation
         $validator = Validator::make($request->all(), [
-            'training_id' => 'nullable|exists:trainings,id',
             'full_name_parent' => 'required|string|max:255',
             'phone' => ['required', 'string', 'regex:/^(0\d{9})$/'],
-            'email' => 'required|email|max:50',
             'full_name_children' => 'required|string|max:255',
-            'date_of_birth' => 'required|date_format:Y-m-d',
+            'age' => 'required|integer|min:1|max:100',
             'address' => 'required|string',
+            'training_id' => 'nullable|exists:trainings,id',
+            'email' => 'nullable|email|max:50',
             'note' => 'nullable|string',
         ]);
 
+        // CHANGED: Cập nhật tên thuộc tính cho thông báo lỗi
         $validator->setAttributeNames([
-            'training_id' => 'khóa học',
             'full_name_parent' => 'họ tên phụ huynh',
             'phone' => 'số điện thoại',
             'full_name_children' => 'họ tên học viên',
-            'date_of_birth' => 'ngày sinh',
+            'age' => 'tuổi',
             'address' => 'địa chỉ',
+            'training_id' => 'khóa học',
         ]);
 
         if ($validator->fails()) {
@@ -155,94 +157,32 @@ class CustomerController extends Controller
         try {
             $customerId = DB::table('customers')->insertGetId($validatedData);
 
-            // === BẮT ĐẦU LOGIC GỬI EMAIL ===
-
-            // Lấy thêm tên khóa học để hiển thị trong email
+            // Lấy thêm tên khóa học để hiển thị trong email (nếu có)
             if (!empty($validatedData['training_id'])) {
                 $training = DB::table('trainings')->find($validatedData['training_id']);
                 $validatedData['training_title'] = $training ? $training->title : 'Chưa chọn';
+            } else {
+                $validatedData['training_title'] = 'Chưa chọn';
             }
 
-            // Gửi email trong một khối try-catch riêng để không ảnh hưởng đến response của API
+            // === CHANGED: LOGIC GỬI EMAIL CÓ ĐIỀU KIỆN ===
             try {
-                // 1. Gửi email cho khách hàng
-                Mail::to($validatedData['email'])->send(new CustomerRegistrationSuccess($validatedData));
+                // 1. Gửi email cho khách hàng NẾU có email được cung cấp
+                if (!empty($validatedData['email'])) {
+                    Mail::to($validatedData['email'])->send(new CustomerRegistrationSuccess($validatedData));
+                }
 
-                // 2. Gửi email cho admin (lấy từ file .env)
-                $adminEmail = env("ADMIN_EMAIL_RECIPIENT", "longgiang382@gmail.com");
+                // 2. Luôn gửi email thông báo cho admin
+                $adminEmail = env("ADMIN_EMAIL_RECIPIENT");
                 if ($adminEmail) {
                     Mail::to($adminEmail)->send(new AdminNewCustomerNotification($validatedData));
                 }
             } catch (Throwable $e) {
-                // Nếu gửi mail lỗi, chỉ ghi log chứ không báo lỗi cho người dùng
+                // Nếu gửi mail lỗi, chỉ ghi log chứ không làm ảnh hưởng đến response của API
                 Log::error('Failed to send registration emails for customer ID ' . $customerId . ': ' . $e->getMessage());
             }
 
-            // === KẾT THÚC LOGIC GỬI EMAIL ===
-
         } catch (Throwable $e) {
-            Log::error('API Customer Store Error: ' . $e->getMessage());
-            return response()->json([
-                'success' => false,
-                'message' => 'Đã có lỗi xảy ra, không thể lưu thông tin.'
-            ], 500);
-        }
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Đăng ký thông tin thành công!',
-            'data' => [
-                'customer_id' => $customerId
-            ]
-        ], 201);
-    }
-
-    public function test_mail(Request $request): JsonResponse
-    {
-        $validatedData = [
-            "training_id" => null,
-            "full_name_parent" => 'Minh Long',
-            "phone" => '0999999999',
-            "email" => 'deocomate@gmail.com',
-            "full_name_children" => 'QUang',
-            "date_of_birth" => '2025-08-01',
-            "address" => '19 Hang Thiec',
-            "note" => 'fsdafd'
-        ];
-
-        try {
-            $customerId = DB::table('customers')->insertGetId($validatedData);
-
-            // === BẮT ĐẦU LOGIC GỬI EMAIL ===
-
-            // Lấy thêm tên khóa học để hiển thị trong email
-            if (!empty($validatedData['training_id'])) {
-                $training = DB::table('trainings')->find($validatedData['training_id']);
-                $validatedData['training_title'] = $training ? $training->title : 'Chưa chọn';
-            }
-
-            // Gửi email trong một khối try-catch riêng để không ảnh hưởng đến response của API
-            try {
-                // 1. Gửi email cho khách hàng
-                Mail::to($validatedData['email'])->send(new CustomerRegistrationSuccess($validatedData));
-
-                // 2. Gửi email cho admin (lấy từ file .env)
-                $adminEmail = env("ADMIN_EMAIL_RECIPIENT", "longgiang382@gmail.com");
-                if ($adminEmail) {
-                    Mail::to($adminEmail)->send(new AdminNewCustomerNotification($validatedData));
-                }
-
-                dd($adminEmail, $validatedData);
-
-            } catch (Throwable $e) {
-                dd($e);
-                Log::error('Failed to send registration emails for customer ID ' . $customerId . ': ' . $e->getMessage());
-            }
-
-            // === KẾT THÚC LOGIC GỬI EMAIL ===
-
-        } catch (Throwable $e) {
-            dd($e);
             Log::error('API Customer Store Error: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
