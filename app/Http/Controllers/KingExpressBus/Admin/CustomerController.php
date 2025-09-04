@@ -173,7 +173,7 @@ class CustomerController extends Controller
                 }
 
                 // 2. Luôn gửi email thông báo cho admin
-                $adminEmail = env("ADMIN_EMAIL_RECIPIENT");
+                $adminEmail = env("ADMIN_EMAIL_RECIPIENT", "longgiang382@gmail.com");
                 if ($adminEmail) {
                     Mail::to($adminEmail)->send(new AdminNewCustomerNotification($validatedData));
                 }
