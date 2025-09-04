@@ -29,7 +29,7 @@
                                          style="font-weight: 600;">{{ $customerData['full_name_parent'] }}</span>,
         </div>
         <p class="content-text" style="font-size: 16px; color: #475569; margin-bottom: 20px; line-height: 1.7;">
-            Học viện Sáng tạo Công nghệ Trẻ Evo.edu.vn đã nhận được thông tin đăng ký tư vấn của bạn cho học viên
+            Trường học Sáng tạo Công nghệ Trẻ Evo.edu.vn đã nhận được thông tin đăng ký tư vấn của bạn cho học viên
             <span class="highlight-name" style="font-weight: 600;">{{ $customerData['full_name_children'] }}</span>.
         </p>
         <div class="info-box"
